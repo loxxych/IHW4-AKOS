@@ -1,5 +1,3 @@
-#define _POSIX_C_SOURCE 200809L
-
 #include <pthread.h>
 #include <semaphore.h>
 #include <stdbool.h>
@@ -8,7 +6,6 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
 #include <limits.h>
 #include <time.h>
 #include <unistd.h>
@@ -91,26 +88,6 @@ static void sleep_ms(int ms) {
     ts.tv_sec = ms / 1000;
     ts.tv_nsec = (long)(ms % 1000) * 1000000L;
     nanosleep(&ts, NULL);
-}
-
-static int sem_wait_interruptible(sem_t *sem) {
-    if (!stop_requested) {
-        return sem_wait(sem);
-    }
-
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    ts.tv_nsec += 100 * 1000000L; // 100 ms
-    if (ts.tv_nsec >= 1000000000L) {
-        ts.tv_sec += 1;
-        ts.tv_nsec -= 1000000000L;
-    }
-
-    int rc = sem_timedwait(sem, &ts);
-    if (rc == -1 && errno == ETIMEDOUT) {
-        return -1;
-    }
-    return rc;
 }
 
 static void queue_init(PatientQueue *queue, size_t capacity) {
@@ -212,18 +189,10 @@ static SpecialistType choose_specialist(void) {
 static void *duty_doctor_routine(void *arg) {
     DutyDoctorArgs *args = (DutyDoctorArgs *)arg;
     while (true) {
-        if (sem_wait_interruptible(&triage_waiting) == -1 && stop_requested) {
-            break;
-        }
+        sem_wait(&triage_waiting);
         Patient *patient = queue_pop(&triage_queue);
         if (patient == NULL) {
             break;
-        }
-
-        if (stop_requested) {
-            log_event("Дежурный врач %d сообщает пациенту %d о завершении смены", args->id, patient->id);
-            sem_post(&patient->finished);
-            continue;
         }
 
         int talk_time = random_between(config.triage_min_ms, config.triage_max_ms);
@@ -285,18 +254,10 @@ static void *specialist_routine(void *arg) {
     }
 
     while (true) {
-        if (sem_wait_interruptible(waiting) == -1 && stop_requested) {
-            break;
-        }
+        sem_wait(waiting);
         Patient *patient = queue_pop(queue);
         if (patient == NULL) {
             break;
-        }
-
-        if (stop_requested) {
-            log_event("%s сообщает пациенту %d о завершении смены", specialist_name(type), patient->id);
-            sem_post(&patient->finished);
-            continue;
         }
 
         int treat_time = random_between(config.treatment_min_ms, config.treatment_max_ms);
