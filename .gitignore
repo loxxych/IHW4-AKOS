@@ -1,0 +1,5 @@
+# Ignore built binaries for clinic variants
+clinic_basic/clinic_basic
+clinic_cli/clinic_cli
+clinic_io/clinic_io
+clinic_alt/clinic_alt
